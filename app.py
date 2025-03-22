@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
 import requests
+from prophet import Prophet
 
 
 # Cache function to fetch S&P 500 tickers from Wikipedia
@@ -42,36 +43,110 @@ def get_latest_price(ticker):
     return df['Close'].iloc[-1] if not df.empty else None
 
 
+# AI prediction model using Facebook Prophet
+# AI prediction model using Facebook Prophet
+def predict_stock_prices(ticker):
+    start_date = datetime.date.today() - datetime.timedelta(days=5 * 365)
+    df = get_stock_data(ticker, start_date.strftime('%Y-%m-%d'))  # Fixed this line
+
+    if df.empty:
+        st.error("Not enough data to make prediction")
+        return None
+
+    # Convert to DataFrame and reset index
+    df = df.reset_index()
+    df = df[['Date', 'Close']].copy()
+
+    # Rename columns as required by Prophet
+    df = df.rename(columns={"Date": "ds", "Close": "y"})
+    df['ds'] = pd.to_datetime(df['ds'])
+
+    # Remove timezone if present
+    df['ds'] = df['ds'].dt.tz_localize(None)  # Remove timezone from the 'ds' column
+
+    # Initialize Prophet model
+    model = Prophet(daily_seasonality=True)
+    model.fit(df)
+
+    # Make future predictions, no need to pass df again
+    future = model.make_future_dataframe(df, periods=365)  # This line is now correct
+    forecast = model.predict(future)
+
+    today = datetime.date.today()
+    target_dates = {
+        "1 month": today + datetime.timedelta(days=30),
+        "3 months": today + datetime.timedelta(days=90),
+        "1 year": today + datetime.timedelta(days=365)
+    }
+
+    predictions = []
+    for label, target_date in target_dates.items():
+        target_ts = pd.Timestamp(target_date)
+        forecast['diff'] = (forecast['ds'] - target_ts).abs()
+        closest_row = forecast.loc[forecast['diff'].idxmin()]
+        predicted_price = closest_row['yhat']
+        predictions.append({
+            "Timeframe": label,
+            "Predicted Price": round(predicted_price, 2)
+        })
+
+    return predictions
+
+
+
+
 # Function to calculate portfolio progression over time
-def calculate_portfolio_progression():
-    distinct_holdings = {}
+# AI prediction model using Facebook Prophet
+def predict_stock_prices(ticker):
+    start_date = datetime.date.today() - datetime.timedelta(days=5 * 365)
+    df = get_stock_data(ticker, start_date.strftime('%Y-%m-%d'))  # Fixed this line
 
-    # Combine duplicate tickers by summing shares and keeping the earliest purchase date
-    for stock in st.session_state.portfolio:
-        ticker, shares, purchase_date = stock['ticker'], stock['shares'], stock['date']
-        if ticker in distinct_holdings:
-            distinct_holdings[ticker]['shares'] += shares
-            distinct_holdings[ticker]['date'] = min(distinct_holdings[ticker]['date'], purchase_date)
-        else:
-            distinct_holdings[ticker] = {'shares': shares, 'date': purchase_date}
+    if df.empty:
+        st.error("Not enough data to make prediction")
+        return None
 
-    portfolio_value_df = None
+    # Convert to DataFrame and reset index
+    df = df.reset_index()
+    df = df[['Date', 'Close']].copy()
 
-    # Fetch historical stock prices and compute daily portfolio value
-    for ticker, holding in distinct_holdings.items():
-        prices = get_stock_data(ticker, holding['date'])
-        if not prices.empty:
-            stock_value_df = (prices * holding['shares']).to_frame(ticker)
-            portfolio_value_df = stock_value_df if portfolio_value_df is None else portfolio_value_df.join(
-                stock_value_df, how='outer')
+    # Rename columns as required by Prophet
+    df = df.rename(columns={"Date": "ds", "Close": "y"})
+    df['ds'] = pd.to_datetime(df['ds'])
 
-    if portfolio_value_df is not None:
-        portfolio_value_df = portfolio_value_df.sort_index().fillna(method='ffill').fillna(0)
-        portfolio_value_df['Total Value'] = portfolio_value_df.sum(axis=1)
-        portfolio_value_df = portfolio_value_df.reset_index().rename(columns={'index': 'Date'})
-        return portfolio_value_df
+    # Remove timezone if present
+    df['ds'] = df['ds'].dt.tz_localize(None)  # Remove timezone from the 'ds' column
 
-    return pd.DataFrame()
+    # Initialize Prophet model
+    model = Prophet(daily_seasonality=True)
+
+    # Fit the model
+    model.fit(df)
+
+    # Generate future dataframe
+    future = model.make_future_dataframe(df, periods=365, freq='D')  # Adding freq='D' ensures daily frequency
+
+    # Perform prediction
+    forecast = model.predict(future)
+
+    today = datetime.date.today()
+    target_dates = {
+        "1 month": today + datetime.timedelta(days=30),
+        "3 months": today + datetime.timedelta(days=90),
+        "1 year": today + datetime.timedelta(days=365)
+    }
+
+    predictions = []
+    for label, target_date in target_dates.items():
+        target_ts = pd.Timestamp(target_date)
+        forecast['diff'] = (forecast['ds'] - target_ts).abs()
+        closest_row = forecast.loc[forecast['diff'].idxmin()]
+        predicted_price = closest_row['yhat']
+        predictions.append({
+            "Timeframe": label,
+            "Predicted Price": round(predicted_price, 2)
+        })
+
+    return predictions
 
 
 # Fetch S&P 500 tickers
@@ -94,6 +169,7 @@ if st.button("Add to Portfolio") and ticker:
 
 # Display portfolio progression chart if portfolio exists
 if st.session_state.portfolio:
+    st.subheader("Portfolio Value Over Time")
     progression_df = calculate_portfolio_progression()
     if not progression_df.empty:
         fig, ax = plt.subplots()
@@ -131,3 +207,12 @@ if st.session_state.portfolio:
         st.dataframe(holdings_df)
     else:
         st.info("No holdings to display yet.")
+
+st.subheader("AI-Powered Stock Price Predictions")
+
+if st.button("Show AI Predictions"):
+    with st.spinner("Predicting... Please wait."):
+        predictions = predict_stock_prices(ticker)
+
+        if predictions:
+            st.table(pd.DataFrame(predictions))
